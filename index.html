@@ -1,0 +1,271 @@
+<head>
+  <title>twilio-ivr-test-suite</title>
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js"></script>
+  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" rel="stylesheet"/>
+</head>
+
+<body>
+  <div class="card">
+    <h2 class="text-center">
+      IVR Simulation
+    </h2>
+
+    <div class="card-body">
+      <div id="responseContainer">
+        <h4 class="text-center">
+          Response
+        </h4>
+
+        <div class="text-right"
+             style="padding-right: 22px; margin-bottom: -20px;">
+          <label for="rawCheckbox">
+            Show Raw
+          </label>
+
+          <input id="rawCheckbox"
+                 type="checkbox"/>
+        </div>
+
+        <div class="row"
+             style="
+                          min-height: 100px;
+                          padding: 20px;
+                          font-size: 14px;
+                          background-color: black;
+                          margin: 20px;
+                          color: limegreen;
+                          border-radius: 10px;
+                       ">
+          <div class="col-12">
+            <div id="textResponse"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-6">
+          <label for="fromPhoneNumber">
+            From Number
+          </label>
+
+          <input type="text"
+                 id="fromPhoneNumber"
+                 class="form-control"
+                 placeholder="(XXX) XXX-XXXX"/>
+        </div>
+
+        <div class="col-6">
+          <label for="toPhoneNumber">
+            To Number
+          </label>
+
+          <input type="text"
+                 id="toPhoneNumber"
+                 class="form-control"
+                 placeholder="(XXX) XXX-XXXX"/>
+        </div>
+
+        <div class="col-6">
+          <label for="textDigits">
+            Digits
+          </label>
+
+          <input type="text"
+                 id="textDigits"
+                 class="form-control"
+                 style="margin-top: 24px;"
+                 placeholder="0 - 9"/>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-3">
+          <button id="previousButton"
+                  class="btn btn-warning form-control"
+                  style="margin-top: 10px;"
+                  disabled>
+            Previous
+          </button>
+        </div>
+
+        <div class="col-6">
+          <button id="sendButton"
+                  class="btn btn-primary form-control"
+                  style="margin-top: 10px;">
+            Send
+          </button>
+        </div>
+
+        <div class="col-3">
+          <button id="nextButton"
+                  class="btn btn-success form-control"
+                  style="margin-top: 10px;"
+                  disabled>
+            Next
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="text/javascript">
+    $(document).ready(
+      function() {
+        var currentIndex = 0;
+        var historyDepth = 0;
+        var nextActions = ['https://myurl.com/twilio'];
+        var htmlTexts = [''];
+        var sayTexts = [''];
+
+        function executeNextAction() {
+          $('#sendButton').prop('disabled', true).text('Sending...');
+
+          var data = {};
+
+          var digits = $('#textDigits').val();
+          if (digits !== '') {
+            data.Digits = digits;
+          }
+
+          var from = $('#fromPhoneNumber').val();
+          if (from !== '') {
+            data.From = from;
+          }
+
+          var to = $('#toPhoneNumber').val();
+          if (to !== '') {
+            data.To = to;
+          }
+
+          data.Direction = 'inbound'; // TODO: outbound-api
+
+          if (currentIndex < historyDepth) {
+            nextActions.splice(currentIndex + 1);
+            htmlTexts.splice(currentIndex + 1);
+            sayTexts.splice(currentIndex + 1);
+
+            historyDepth = currentIndex;
+          }
+
+          $.post(nextActions[historyDepth], data).then(
+            function(a) {
+              historyDepth++;
+              currentIndex = historyDepth;
+
+              $('#textDigits').val('');
+
+              var text = $(a).children()[0].outerHTML;
+
+              var sayMatch = text.match(/<Say.*>.+<\/Say>/);
+              if (sayMatch && sayMatch.length !== 0) {
+                sayTexts.push(sayMatch[0].replace(/<Say.*>h/, 'h').replace('</Say>', ''));
+              } else {
+                sayTexts.push('');
+              }
+
+              var htmlText = '';
+
+              var tempHtmlText = text.replace(new RegExp(/>/, "g"), "&gt;");
+              tempHtmlText = tempHtmlText.replace(new RegExp(/</, "g"), "&lt;");
+              tempHtmlText = tempHtmlText.replace(new RegExp(/&gt;/, "g"), "&gt;<br/>");
+              tempHtmlText = tempHtmlText.replace(new RegExp(/&lt;/, "g"), "<br/>&lt;");
+              tempHtmlText = tempHtmlText.replace(new RegExp(/<br\/><br\/>/, "g"), "<br/>");
+
+              var tabCount = -1;
+              var consecutiveEnd = false;
+              var consecutiveLt = false;
+
+              tempHtmlText.split("<br/>").forEach(
+                function(part) {
+                  if (part.indexOf('&lt;/') === 0) {
+                    tabCount--;
+                    consecutiveEnd = true;
+                    consecutiveLt = false;
+                  } else if (part.indexOf('&lt;') === 0 && !consecutiveEnd) {
+                    tabCount++;
+                    consecutiveEnd = false;
+                    consecutiveLt = true;
+                  } else if (consecutiveLt) {
+                    tabCount++;
+                    consecutiveEnd = false;
+                    consecutiveLt = false;
+                  }
+
+                  if (tabCount > 0) {
+                    htmlText += "&nbsp;&nbsp;&nbsp;".repeat(tabCount);
+                  }
+
+                  htmlText += part + "<br/>";
+
+                  showResponse();
+                }
+              );
+
+              htmlTexts.push(htmlText);
+
+              var redirectMatch = text.match(/<Redirect.*>.+<\/Redirect>/);
+              if (redirectMatch && redirectMatch.length !== 0) {
+                nextActions.push(redirectMatch[0].replace(/<Redirect .*>h/, 'h').replace('</Redirect>', ''));
+
+                return executeNextAction();
+              }
+
+              var actionMatch = text.match(/action=".*"/);
+              if (actionMatch && actionMatch.length !== 0) {
+                nextActions.push(actionMatch[0].replace('action="', '').replace('"', ''));
+              }
+            },
+            function(error) {
+              console.error(error);
+
+            }
+          ).always(
+            function() {
+              $('#sendButton').prop('disabled', false).text('Send');
+            }
+          );
+        }
+
+        $('#sendButton').on('click', executeNextAction);
+
+        $('#previousButton').on(
+          'click',
+          function() {
+            if (currentIndex > 0) {
+              currentIndex--;
+            }
+
+            showResponse();
+          }
+        );
+
+        $('#nextButton').on(
+          'click',
+          function() {
+            if (currentIndex < historyDepth) {
+              currentIndex++;
+            }
+
+            showResponse();
+          }
+        );
+
+        function showResponse() {
+          if ($('#rawCheckbox').is(':checked')) {
+            $('#textResponse').html(htmlTexts[currentIndex]);
+          } else {
+            $('#textResponse').html(sayTexts[currentIndex]);
+          }
+
+          $('#previousButton').prop('disabled', currentIndex === 0);
+          $('#nextButton').prop('disabled', currentIndex === historyDepth);
+        }
+
+        $('#rawCheckbox').on('click', showResponse);
+      }
+    );
+  </script>
+</body>
